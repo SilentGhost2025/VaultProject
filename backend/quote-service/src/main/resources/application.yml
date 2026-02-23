@@ -1,0 +1,27 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: quote-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+info:
+  app:
+    name: Quote Service
+    version: 1.0.0
+    description: In-memory quote management microservice

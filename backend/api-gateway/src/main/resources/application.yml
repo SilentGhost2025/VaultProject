@@ -1,0 +1,42 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: quote-service
+          uri: ${QUOTE_SERVICE_URL:http://quote-service:8081}
+          predicates:
+            - Path=/api/quotes/**
+          filters:
+            - StripPrefix=1
+        - id: user-service
+          uri: ${USER_SERVICE_URL:http://user-service:8082}
+          predicates:
+            - Path=/api/users/**
+          filters:
+            - StripPrefix=1
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+info:
+  app:
+    name: API Gateway
+    version: 1.0.0
+    description: Spring Cloud Gateway for microservices routing
