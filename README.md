@@ -144,7 +144,7 @@ witty-tale-vault/
 SSH into your Bastion Host and run:
 
 ```bash
-aws eks update-kubeconfig --region <your-region> --name <your-cluster-name>
+aws eks update-kubeconfig --region us-east-1 --name TeamCity_EKS
 
 # Verify access
 kubectl get nodes
