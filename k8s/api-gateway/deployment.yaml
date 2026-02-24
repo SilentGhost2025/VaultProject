@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: api-gateway
-          image: silentghost1/api-gateway:latest
+          image: silentghost1/api-gateway:1
           ports:
             - containerPort: 8080
           envFrom:
