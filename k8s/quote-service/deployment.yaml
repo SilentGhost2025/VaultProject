@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: quote-service
-          image: ghcr.io/your-org/quote-service:latest
+          image: silentghost1/quote-service:1
           ports:
             - containerPort: 8081
           envFrom:
