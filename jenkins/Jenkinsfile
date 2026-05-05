@@ -9,7 +9,6 @@ pipeline {
     tools {
         maven 'maven'
         /* jdk   'JDK21' */
-        /* test */
     }
 
     stages {
@@ -54,6 +53,7 @@ pipeline {
                 sh 'docker build -t ${DOCKERHUB_USERNAME}/api-gateway:latest backend/api-gateway'
                 sh 'docker build -t ${DOCKERHUB_USERNAME}/quote-service:latest backend/quote-service'
                 sh 'docker build -t ${DOCKERHUB_USERNAME}/user-service:latest backend/user-service'
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/frontend:latest .'
             }
         }
 
@@ -68,6 +68,7 @@ pipeline {
                     sh 'docker push ${DOCKERHUB_USERNAME}/api-gateway:latest'
                     sh 'docker push ${DOCKERHUB_USERNAME}/quote-service:latest'
                     sh 'docker push ${DOCKERHUB_USERNAME}/user-service:latest'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/frontend:latest'
                 }
             }
         }
@@ -104,3 +105,4 @@ pipeline {
         }
     }
 }
+
