@@ -1,0 +1,32 @@
+# Terraform state files — never commit these
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform variable files with secrets — never commit
+terraform.tfvars
+*.auto.tfvars
+
+# Terraform working directory
+.terraform/
+.terraform.lock.hcl
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# SSH keys — never commit
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+
+# OS generated files
+.DS_Store
+Thumbs.db
