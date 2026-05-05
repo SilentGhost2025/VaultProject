@@ -78,3 +78,10 @@ output "app_access_instructions" {
   description = "How to reach the app API gateway via SSH tunnel"
   value       = "ssh -L 8080:${module.app_server.private_ip}:8080 -i <your-key>.pem ubuntu@${module.bastion.public_ip} then open http://localhost:8080"
 }
+
+# ── ALB ─────────────────────────────────────────────────────────────────────
+output "app_url" {
+  description = "Public URL to access your application via the load balancer"
+  value       = "http://${module.alb.alb_dns_name}"
+}
+

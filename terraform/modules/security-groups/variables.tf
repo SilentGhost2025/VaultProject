@@ -15,3 +15,9 @@ variable "your_ip_cidr" {
   description = "Your IP address in CIDR notation for bastion SSH access"
   type        = string
 }
+
+variable "alb_sg_id" {
+  description = "ALB security group ID"
+  type        = string
+  default     = ""
+}

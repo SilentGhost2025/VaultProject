@@ -59,6 +59,7 @@ module "security_groups" {
   environment  = var.environment
   vpc_id       = module.vpc.vpc_id
   your_ip_cidr = var.your_ip_cidr
+  alb_sg_id    = module.alb.alb_sg_id
 }
 
 ################################################################################
@@ -159,4 +160,19 @@ module "app_server" {
     project_name = var.project_name
   })
   root_volume_size      = 30
+}
+
+################################################################################
+# ALB module — Load Balancer in public subnets, Target Group for app server
+################################################################################
+
+module "alb" {
+  source = "./modules/alb"
+
+  project_name           = var.project_name
+  environment            = var.environment
+  vpc_id                 = module.vpc.vpc_id
+  public_subnet_ids      = module.vpc.public_subnet_ids
+  app_server_instance_id = module.app_server.instance_id
+  app_sg_id              = module.security_groups.app_sg_id
 }
