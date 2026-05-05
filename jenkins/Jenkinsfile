@@ -1,0 +1,105 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKERHUB_USERNAME = 'silentghost1'
+        APP_SERVER_IP      = '10.0.10.156'  // Replace with your app server private IP
+    }
+
+    tools {
+        maven 'maven'
+        /* jdk   'JDK21' */
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/SilentGhost2025/VaultProject.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir('backend/api-gateway') {
+                    sh 'mvn clean package -DskipTests=true'
+                }
+                dir('backend/quote-service') {
+                    sh 'mvn clean package -DskipTests=true'
+                }
+                dir('backend/user-service') {
+                    sh 'mvn clean package -DskipTests=true'
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                dir('backend/api-gateway') {
+                    sh 'mvn test'
+                }
+                dir('backend/quote-service') {
+                    sh 'mvn test'
+                }
+                dir('backend/user-service') {
+                    sh 'mvn test'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/api-gateway:latest backend/api-gateway'
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/quote-service:latest backend/quote-service'
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/user-service:latest backend/user-service'
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-credentials',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/api-gateway:latest'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/quote-service:latest'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/user-service:latest'
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'appserver-ssh-key',
+                    keyFileVariable: 'SSH_KEY'
+                )]) {
+                    sh '''
+                        scp -i $SSH_KEY -o StrictHostKeyChecking=no \
+                            docker-compose.yml \
+                            ubuntu@${APP_SERVER_IP}:/opt/witty-tale-vault/docker-compose.yml
+
+                        ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} "
+                            cd /opt/witty-tale-vault &&
+                            docker compose pull &&
+                            docker compose up -d
+                        "
+                    '''
+                }
+            }
+        }
+
+    }
+
+    post {
+        success {
+            echo '========== DEPLOYMENT SUCCESSFUL =========='
+        }
+        failure {
+            echo '========== PIPELINE FAILED - Check the logs above =========='
+        }
+    }
+}
