@@ -9,6 +9,7 @@ pipeline {
     tools {
         maven 'maven'
         /* jdk   'JDK21' */
+        /* test */
     }
 
     stages {
