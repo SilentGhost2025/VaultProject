@@ -41,7 +41,7 @@ Internet
 [SonarQube Server] (External) --> Code quality analysis
 [App Server] (Private Subnet) --> Runs all Docker containers
 ```
-![Architecture Diagram](images/architectural-diagram.png)
+![Architectural Diagram](images/architectural_diagram.png)
 
 ### AWS Infrastructure
 
