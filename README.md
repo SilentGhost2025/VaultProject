@@ -22,7 +22,10 @@ Witty Tale Vault is a microservices-based web application deployed on AWS using 
 
 ### Architecture Diagram
 
-![Architecture Diagram](.images/architectural_diagram.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SilentGhost2025/VaultProject/main/images/architectural_diagram.png" width="800"/>
+</p>
+
 
 ### High-Level Flow
 
