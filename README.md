@@ -185,6 +185,7 @@ services:
 ## 8. Accessing the Application
 
 http://<ALB_DNS_NAME>
+http://witty-tale-vault-prod-alb-304369225.us-east-1.elb.amazonaws.com
 
 ---
 
