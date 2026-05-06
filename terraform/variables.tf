@@ -51,14 +51,12 @@ variable "availability_zones" {
 variable "your_ip_cidr" {
   description = "Your personal IP address in CIDR notation for SSH access to bastion (e.g. 1.2.3.4/32)"
   type        = string
-  default = "0.0.0.0/0"
   # Override this in terraform.tfvars — never leave 0.0.0.0/0 in production
 }
 
 variable "key_name" {
   description = "Name of the EC2 key pair for SSH access"
   type        = string
-  default = "NewKEY"
 }
 
 # ── EC2 Instance Types ────────────────────────────────────────────────────────
