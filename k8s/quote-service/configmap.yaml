@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: quote-service-config
-data:
-  SERVER_PORT: "8081"
