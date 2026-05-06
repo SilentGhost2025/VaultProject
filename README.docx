@@ -1,0 +1,513 @@
+# Witty Tale Vault — DevOps Deployment Guide
+
+## Table of Contents
+1. Architecture Overview
+2. Prerequisites
+3. Infrastructure Setup (Terraform)
+4. Jenkins Setup
+5. SonarQube Setup
+6. CI/CD Pipeline
+7. Application Deployment
+8. Accessing the Application
+9. Monitoring & Logging
+10. Design Decisions
+11. Assumptions
+12. Limitations & Improvements
+
+---
+
+## 1. Architecture Overview
+
+Witty Tale Vault is a microservices-based web application deployed on AWS using modern DevOps practices. The system consists of three Spring Boot backend services and a React frontend, all containerized with Docker and deployed on EC2 instances inside a secure VPC.
+
+### Architecture Diagram
+
+```
+Internet
+    |
+    v
+[Application Load Balancer] (Public)
+    |
+    v
+[Frontend Container - Nginx:80] (Private Subnet)
+    |
+    |-- /api/* --> [API Gateway:8080]
+                        |
+                        |-- /api/quotes --> [Quote Service:8081]
+                        |-- /api/users  --> [User Service:8082]
+
+[Bastion Host] (Public Subnet) --> SSH jump into all private servers
+[Jenkins Server] (Private Subnet) --> CI/CD pipeline
+[SonarQube Server] (External) --> Code quality analysis
+[App Server] (Private Subnet) --> Runs all Docker containers
+```
+![Architecture Diagram](images/architectural-diagram.png)
+
+### AWS Infrastructure
+
+| Resource | Details |
+|---|---|
+| VPC | 10.0.0.0/16 with public and private subnets across 2 AZs |
+| Public Subnets | Bastion Host, Application Load Balancer |
+| Private Subnets | Jenkins, App Server |
+| NAT Gateway | Allows private instances to reach internet |
+| ALB | Routes public traffic to frontend on port 80 |
+| Bastion Host | Single SSH entry point into private network |
+| EC2 Instances | t3.micro for all servers (4 total) |
+| CloudWatch | Logs and metrics for all instances |
+| VPC Flow Logs | Network traffic auditing |
+
+---
+
+## 2. Prerequisites
+
+Before you begin, ensure you have the following installed and configured on your local machine:
+
+- **Terraform** >= 1.6.0
+- **AWS CLI** configured with your credentials (`aws configure`)
+- **Git**
+- **An AWS account** with permissions to create EC2, VPC, ALB, IAM, S3, DynamoDB resources
+- **An EC2 Key Pair** created in your AWS region
+- **A DockerHub account**
+
+---
+
+## 3. Infrastructure Setup (Terraform)
+
+### Step 1 — Create the S3 Backend
+
+Before running Terraform, create the S3 bucket and DynamoDB table for remote state storage. Run this once:
+
+```bash
+cd terraform/scripts
+chmod +x bootstrap-backend.sh
+./bootstrap-backend.sh
+```
+
+### Step 2 — Configure Variables
+
+Copy the example variables file and fill in your values:
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Open `terraform.tfvars` and update:
+
+```hcl
+your_ip_cidr = "YOUR_IP_ADDRESS/32"   # Get your IP: curl ifconfig.me
+key_name     = "your-key-pair-name"   # EC2 key pair name (without .pem)
+ami_id       = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS us-east-1
+```
+
+### Step 3 — Deploy Infrastructure
+
+```bash
+terraform init
+terraform plan
+terraform apply --auto-approve
+```
+
+Terraform will create the following resources:
+- VPC with public and private subnets
+- Internet Gateway and NAT Gateway
+- Bastion Host (public subnet)
+- Jenkins Server (private subnet)
+- App Server (private subnet)
+- Application Load Balancer
+- Security Groups (one per server)
+- IAM roles and instance profiles
+- CloudWatch log groups and alarms
+- VPC Flow Logs
+
+After apply completes, note down the outputs:
+```
+bastion_public_ip     = "x.x.x.x"
+jenkins_private_ip    = "10.0.10.x"
+app_server_private_ip = "10.0.10.x"
+app_url               = "http://witty-tale-vault-prod-alb-xxxx.us-east-1.elb.amazonaws.com"
+```
+
+---
+
+## 4. Jenkins Setup
+
+Jenkins runs in the private subnet. Access it via SSH tunnel through the bastion.
+
+### Step 1 — SSH into Jenkins Server
+
+```bash
+# From your local machine, SSH into bastion
+ssh -i your-key.pem ubuntu@<BASTION_PUBLIC_IP>
+
+# From bastion, jump into Jenkins
+ssh -i your-key.pem ubuntu@<JENKINS_PRIVATE_IP>
+```
+
+### Step 2 — Install Dependencies
+
+Run these commands one by one on the Jenkins server:
+
+```bash
+# Update system
+sudo apt-get update -y && sudo apt-get upgrade -y
+
+# Install Java 21
+sudo apt-get install -y openjdk-21-jdk
+
+# Install Maven
+sudo apt-get install -y maven
+
+# Install Docker
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt-get update -y
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable docker && sudo systemctl start docker
+
+# Install Jenkins
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | gpg --dearmor | sudo tee /usr/share/keyrings/jenkins-keyring.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.gpg] https://pkg.jenkins.io/debian-stable binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list
+sudo apt-get update -y && sudo apt-get install -y jenkins
+
+# Add Jenkins to Docker group
+sudo usermod -aG docker jenkins
+sudo systemctl restart jenkins
+
+# Add swap space (prevents OOM on t3.micro)
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### Step 3 — Access Jenkins UI
+
+Open an SSH tunnel from your local machine:
+
+```bash
+ssh -i your-key.pem -L 8080:<JENKINS_PRIVATE_IP>:8080 ubuntu@<BASTION_PUBLIC_IP> -N
+```
+
+Open your browser at `http://localhost:8080` and unlock Jenkins with:
+
+```bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+```
+
+Install the suggested plugins and create an admin user.
+
+### Step 4 — Configure Jenkins Tools
+
+Go to **Manage Jenkins → Tools** and configure:
+
+**JDK:**
+- Name: `JDK21`
+- JAVA_HOME: `/usr/lib/jvm/java-21-openjdk-amd64`
+
+**Maven:**
+- Name: `maven`
+- Install automatically: Maven 3.9.6
+
+### Step 5 — Store Credentials
+
+Go to **Manage Jenkins → Credentials → System → Global credentials → Add Credentials**
+
+**DockerHub credentials:**
+- Kind: Username with password
+- Username: your DockerHub username
+- Password: your DockerHub password
+- ID: `dockerhub-credentials`
+
+**App Server SSH Key:**
+- Kind: SSH Username with private key
+- Username: `ubuntu`
+- ID: `appserver-ssh-key`
+- Private Key: paste the contents of your `.pem` key file
+
+---
+
+## 5. App Server Setup
+
+SSH into the app server through the bastion and install Docker:
+
+```bash
+# From bastion
+ssh -i your-key.pem ubuntu@<APP_SERVER_PRIVATE_IP>
+
+# Install Docker
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/docker-archive-keyring.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt-get update -y
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable docker && sudo systemctl start docker
+sudo usermod -aG docker ubuntu
+
+# Create deployment directory
+sudo mkdir -p /opt/witty-tale-vault
+sudo chown ubuntu:ubuntu /opt/witty-tale-vault
+```
+
+---
+
+## 6. CI/CD Pipeline
+
+The Jenkins pipeline is defined in the `Jenkinsfile` at the root of the repository. It consists of the following stages:
+
+### Pipeline Stages
+
+| Stage | Description |
+|---|---|
+| Checkout | Pulls latest code from GitHub |
+| Build | Compiles all 3 Spring Boot services using Maven |
+| Test | Runs unit tests for all 3 services |
+| Docker Build | Builds Docker images for all 4 services (including frontend) |
+| Docker Push | Pushes images to DockerHub |
+| Deploy | SSHes into App Server and runs docker compose |
+
+### Create the Jenkins Pipeline Job
+
+1. In Jenkins, click **New Item**
+2. Enter name: `witty-tale-vault`
+3. Select **Pipeline** and click OK
+4. Under **Pipeline**, select **Pipeline script from SCM**
+5. SCM: **Git**
+6. Repository URL: `https://github.com/SilentGhost2025/VaultProject.git`
+7. Branch: `*/main`
+8. Script Path: `Jenkinsfile`
+9. Click **Save** then **Build Now**
+
+### Jenkinsfile
+
+```groovy
+pipeline {
+    agent any
+
+    environment {
+        DOCKERHUB_USERNAME = 'silentghost1'
+        APP_SERVER_IP      = '10.0.10.x' // Replace with your app server private IP
+    }
+
+    tools {
+        maven 'maven'
+        jdk   'JDK21'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/SilentGhost2025/VaultProject.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir('backend/api-gateway') { sh 'mvn clean package -DskipTests=true' }
+                dir('backend/quote-service') { sh 'mvn clean package -DskipTests=true' }
+                dir('backend/user-service') { sh 'mvn clean package -DskipTests=true' }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                dir('backend/api-gateway') { sh 'mvn test' }
+                dir('backend/quote-service') { sh 'mvn test' }
+                dir('backend/user-service') { sh 'mvn test' }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/frontend:latest .'
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/api-gateway:latest backend/api-gateway'
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/quote-service:latest backend/quote-service'
+                sh 'docker build -t ${DOCKERHUB_USERNAME}/user-service:latest backend/user-service'
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-credentials',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/frontend:latest'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/api-gateway:latest'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/quote-service:latest'
+                    sh 'docker push ${DOCKERHUB_USERNAME}/user-service:latest'
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'appserver-ssh-key',
+                    keyFileVariable: 'SSH_KEY'
+                )]) {
+                    sh '''
+                        scp -i $SSH_KEY -o StrictHostKeyChecking=no \
+                            docker-compose.yml \
+                            ubuntu@${APP_SERVER_IP}:/opt/witty-tale-vault/docker-compose.yml
+
+                        ssh -i $SSH_KEY -o StrictHostKeyChecking=no ubuntu@${APP_SERVER_IP} "
+                            cd /opt/witty-tale-vault &&
+                            docker compose pull &&
+                            docker compose up -d
+                        "
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success { echo '========== DEPLOYMENT SUCCESSFUL ==========' }
+        failure { echo '========== PIPELINE FAILED ==========' }
+    }
+}
+```
+
+---
+
+## 7. Application Deployment
+
+The `docker-compose.yml` at the root of the repo defines all 4 containers:
+
+```yaml
+services:
+  frontend:
+    image: silentghost1/frontend:latest
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api-gateway
+
+  api-gateway:
+    image: silentghost1/api-gateway:latest
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - quote-service
+      - user-service
+
+  quote-service:
+    image: silentghost1/quote-service:latest
+    container_name: quote-service
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+
+  user-service:
+    image: silentghost1/user-service:latest
+    container_name: user-service
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+```
+
+---
+
+## 8. Accessing the Application
+
+### Frontend (via ALB)
+
+Open the ALB DNS name in your browser:
+```
+http://witty-tale-vault-prod-alb-xxxx.us-east-1.elb.amazonaws.com
+```
+
+### API Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `/actuator/health` | Health check |
+| `/api/quotes` | Get all quotes |
+| `/api/users` | Get all users |
+
+### Jenkins UI (via SSH Tunnel)
+
+```bash
+ssh -i your-key.pem -L 8080:<JENKINS_PRIVATE_IP>:8080 ubuntu@<BASTION_PUBLIC_IP> -N
+```
+Then open: `http://localhost:8080`
+
+### SonarQube UI (via SSH Tunnel)
+
+```bash
+ssh -i your-key.pem -L 9000:<SONARQUBE_PRIVATE_IP>:9000 ubuntu@<BASTION_PUBLIC_IP> -N
+```
+Then open: `http://localhost:9000`
+
+---
+
+## 9. Monitoring & Logging
+
+CloudWatch is configured on all EC2 instances via IAM roles. The following log groups are created automatically:
+
+| Log Group | Contents |
+|---|---|
+| `/witty-tale-vault/bastion/auth` | SSH access logs |
+| `/witty-tale-vault/jenkins/app` | Jenkins application logs |
+| `/witty-tale-vault/app/auth` | App server auth logs |
+| `/aws/vpc/witty-tale-vault-prod/flow-logs` | VPC network traffic |
+
+CloudWatch CPU alarms are created for all EC2 instances and trigger when CPU exceeds 80%.
+
+To view logs, go to **AWS Console → CloudWatch → Log Groups**.
+
+---
+
+## 10. Design Decisions
+
+**Why EC2 over ECS/EKS?**
+EC2 gives full control over the environment and is simpler to manage for a small microservices setup. EKS adds significant operational overhead that isn't justified at this scale.
+
+**Why Jenkins over GitHub Actions?**
+Jenkins was chosen as it runs within the private VPC, keeping the pipeline close to the deployment target. It also gives full control over the build environment with no external dependencies.
+
+**Why DockerHub over ECR?**
+DockerHub is simpler to set up and doesn't require additional AWS permissions. ECR would be the better choice in a fully production environment.
+
+**Why a Bastion Host?**
+All application servers are in private subnets with no public IPs. The bastion is the single controlled entry point, reducing the attack surface significantly.
+
+**Why an Application Load Balancer?**
+The ALB provides a stable public DNS name, health checking, and the ability to scale to multiple app servers in the future without changing the user-facing URL.
+
+**Modular Terraform**
+All infrastructure is broken into reusable modules (vpc, ec2, security-groups, iam, alb) so any component can be modified or reused independently.
+
+---
+
+## 11. Assumptions
+
+- The AWS account has sufficient service limits (at least 8 vCPUs for t3.micro instances)
+- The deployer has an existing EC2 key pair in the target AWS region
+- DockerHub repositories are public or the credentials are stored in Jenkins
+- The application runs on a single app server (no horizontal scaling required)
+- HTTP (not HTTPS) is acceptable for this assessment
+
+---
+
+## 12. Limitations & Improvements
+
+| Limitation | Improvement |
+|---|---|
+| HTTP only, no SSL/TLS | Add ACM certificate and HTTPS listener on ALB |
+| Single app server | Add Auto Scaling Group behind the ALB |
+| t3.micro instances are small | Upgrade to t3.small or t3.medium in production |
+| No database | Add RDS PostgreSQL in a private subnet |
+| Manual Jenkins/Docker install | Bake into a custom AMI using Packer |
+| DockerHub public images | Use Amazon ECR for private image storage |
+| No staging environment | Add a staging environment with separate Terraform workspace |
+| SonarQube not in pipeline | Integrate SonarQube analysis as a pipeline stage |
